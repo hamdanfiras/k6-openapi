@@ -8,6 +8,7 @@ interface CliArgs {
   outDir: string;
   serviceName?: string;
   url?: string;
+  insecure: boolean;
   help: boolean;
 }
 
@@ -22,13 +23,15 @@ async function main(): Promise<void> {
   const services = await resolveServices(args);
   await generate({
     services,
-    outDir: args.outDir
+    outDir: args.outDir,
+    insecure: args.insecure
   });
 }
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     outDir: "generated",
+    insecure: false,
     help: false
   };
 
@@ -55,6 +58,10 @@ function parseArgs(argv: string[]): CliArgs {
       case "-u":
         args.url = readValue(argv, index, arg);
         index += 1;
+        break;
+      case "--insecure":
+      case "--ignore-certs":
+        args.insecure = true;
         break;
       case "--help":
       case "-h":
@@ -114,6 +121,8 @@ Options:
   -s, --service   Generate one service by name
   -u, --url       OpenAPI JSON URL for one service
   -o, --out       Target folder. Defaults to ./generated
+      --insecure  Ignore TLS certificate validation while fetching OpenAPI JSON
+      --ignore-certs
   -h, --help      Show this help
 `);
 }

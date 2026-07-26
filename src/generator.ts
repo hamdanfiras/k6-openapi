@@ -28,6 +28,7 @@ import {
 export interface GenerateOptions {
   services: ServiceConfig[];
   outDir: string;
+  insecure?: boolean;
 }
 
 interface OperationToRender {
@@ -83,7 +84,9 @@ export async function generate(options: GenerateOptions): Promise<void> {
   await writeFile(path.join(servicesDir, "_runtime.ts"), renderRuntime(), "utf8");
 
   for (const service of options.services) {
-    await generateService(service, servicesDir);
+    await generateService(service, servicesDir, {
+      insecure: Boolean(options.insecure)
+    });
   }
 
   await writeServicesIndex(servicesDir);
@@ -91,10 +94,13 @@ export async function generate(options: GenerateOptions): Promise<void> {
 
 async function generateService(
   service: ServiceConfig,
-  servicesDir: string
+  servicesDir: string,
+  options: Pick<GenerateOptions, "insecure">
 ): Promise<void> {
   const serviceName = sanitizeServiceName(service.serviceName);
-  const document = await fetchOpenApiJson(service.url);
+  const document = await fetchOpenApiJson(service.url, {
+    insecure: Boolean(options.insecure)
+  });
   const serviceDir = path.join(servicesDir, serviceName);
   const schemasDir = path.join(serviceDir, "schemas");
   const schemas = document.components?.schemas ?? {};
@@ -367,23 +373,105 @@ function selectJsonSchema(
   );
 }
 
-async function fetchOpenApiJson(url: string): Promise<OpenApiDocument> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json"
-    }
-  });
+async function fetchOpenApiJson(
+  url: string,
+  options: { insecure: boolean }
+): Promise<OpenApiDocument> {
+  let response: Response;
+  try {
+    response = await withOptionalInsecureTls(options.insecure, () =>
+      fetch(url, {
+        headers: {
+          Accept: "application/json"
+        }
+      })
+    );
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch OpenAPI JSON from ${url}.\n${formatErrorDetails(error)}`
+    );
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
   }
 
-  const document = (await response.json()) as OpenApiDocument;
+  let document: OpenApiDocument;
+  try {
+    document = (await response.json()) as OpenApiDocument;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse OpenAPI JSON from ${url}.\n${formatErrorDetails(error)}`
+    );
+  }
+
   if (!document.paths) {
     throw new Error(`${url} did not return an OpenAPI JSON document with paths.`);
   }
 
   return document;
+}
+
+async function withOptionalInsecureTls<T>(
+  insecure: boolean,
+  action: () => Promise<T>
+): Promise<T> {
+  if (!insecure) {
+    return action();
+  }
+
+  const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  try {
+    return await action();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    } else {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+    }
+  }
+}
+
+function formatErrorDetails(error: unknown): string {
+  const lines: string[] = [];
+  let current: unknown = error;
+  let depth = 0;
+
+  while (current && depth < 8) {
+    const label = depth === 0 ? "error" : `cause ${depth}`;
+    lines.push(`${label}: ${describeError(current)}`);
+    current = getErrorCause(current);
+    depth += 1;
+  }
+
+  return lines.join("\n");
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    const details = collectErrorFields(error);
+    return details.length > 0
+      ? `${error.name}: ${error.message} (${details.join(", ")})`
+      : `${error.name}: ${error.message}`;
+  }
+
+  return String(error);
+}
+
+function collectErrorFields(error: Error): string[] {
+  const record = error as Error & Record<string, unknown>;
+  const fields = ["code", "errno", "syscall", "address", "port"];
+  return fields.flatMap((field) => {
+    const value = record[field];
+    return value === undefined ? [] : [`${field}=${String(value)}`];
+  });
+}
+
+function getErrorCause(error: unknown): unknown {
+  return error && typeof error === "object" && "cause" in error
+    ? (error as { cause?: unknown }).cause
+    : undefined;
 }
 
 async function writeServicesIndex(servicesDir: string): Promise<void> {

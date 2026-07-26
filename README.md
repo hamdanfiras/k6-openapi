@@ -21,6 +21,15 @@ node dist/cli.js --service accounts --url https://accounts.example.com/v3/api-do
 
 When installed as a package, the same CLI is exposed as `k6-openapi`.
 
+If your OpenAPI endpoint is behind a proxy that uses local certificates, disable
+TLS certificate validation for the OpenAPI fetch:
+
+```bash
+node dist/cli.js --input services.json --out ./generated --insecure
+```
+
+`--ignore-certs` is also accepted as an alias.
+
 The input file is an array of unique service names and OpenAPI JSON URLs:
 
 ```json
