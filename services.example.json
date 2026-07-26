@@ -1,0 +1,10 @@
+[
+  {
+    "serviceName": "accounts",
+    "url": "https://accounts.example.com/v3/api-docs"
+  },
+  {
+    "serviceName": "cards",
+    "url": "https://cards.example.com/v3/api-docs"
+  }
+]

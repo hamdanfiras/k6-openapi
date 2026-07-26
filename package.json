@@ -1,0 +1,33 @@
+{
+  "name": "k6-openapi",
+  "version": "0.1.0",
+  "description": "Generate thin k6 TypeScript clients from Spring Boot OpenAPI JSON documents.",
+  "type": "module",
+  "bin": {
+    "k6-openapi": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.3"
+  },
+  "peerDependencies": {
+    "@types/k6": "^0.52.0"
+  },
+  "peerDependenciesMeta": {
+    "@types/k6": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
