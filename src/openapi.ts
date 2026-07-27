@@ -13,6 +13,7 @@ export interface ComponentsObject {
   schemas?: Record<string, SchemaObject | ReferenceObject>;
   parameters?: Record<string, ParameterObject | ReferenceObject>;
   requestBodies?: Record<string, RequestBodyObject | ReferenceObject>;
+  responses?: Record<string, ResponseObject | ReferenceObject>;
 }
 
 export type PathItemObject = {
@@ -33,6 +34,7 @@ export interface OperationObject {
   operationId?: string;
   parameters?: Array<ParameterObject | ReferenceObject>;
   requestBody?: RequestBodyObject | ReferenceObject;
+  responses?: Record<string, ResponseObject | ReferenceObject>;
 }
 
 export interface ParameterObject {
@@ -45,6 +47,11 @@ export interface ParameterObject {
 
 export interface RequestBodyObject {
   required?: boolean;
+  content?: Record<string, MediaTypeObject>;
+}
+
+export interface ResponseObject {
+  description?: string;
   content?: Record<string, MediaTypeObject>;
 }
 

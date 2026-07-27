@@ -9,6 +9,7 @@ import {
   type ParameterObject,
   type ReferenceObject,
   type RequestBodyObject,
+  type ResponseObject,
   type SchemaObject,
   type ServiceConfig
 } from "./openapi.js";
@@ -46,6 +47,12 @@ interface RequestShape {
     required: boolean;
     type: string;
   };
+}
+
+interface ResponseShape {
+  interfaceName: string;
+  bodyType: string;
+  parser: "json" | "raw" | "auto" | "undefined";
 }
 
 export async function readServicesConfig(fileName: string): Promise<ServiceConfig[]> {
@@ -148,6 +155,9 @@ async function generateService(
     operationExports.push(
       `export type { ${toTypeName(operationId)}Request } from "./${operationToRender.fileStem}.js";`
     );
+    operationExports.push(
+      `export type { ${toTypeName(operationId)}Result } from "./${operationToRender.fileStem}.js";`
+    );
   }
 
   const indexContent = [
@@ -200,8 +210,15 @@ function renderOperationFile(args: {
     document,
     schemaNames
   });
+  const responseShape = createResponseShape({
+    operationId,
+    operation,
+    document,
+    schemaNames
+  });
 
   const requestInterface = renderRequestInterface(requestShape);
+  const responseInterface = renderResponseInterface(responseShape);
   const pathArg = requestShape.pathParams.length > 0 ? "request.path" : "undefined";
   const queryArg = requestShape.queryParams.length > 0 ? "request.query" : "undefined";
   const bodyInitializer = requestShape.body
@@ -213,13 +230,19 @@ function renderOperationFile(args: {
   const runtimeImports = requestShape.body
     ? "buildUrl, withJsonHeaders"
     : "buildUrl";
+  const runtimeImportNames = new Set(runtimeImports.split(", "));
+  if (responseShape.parser === "auto") {
+    runtimeImportNames.add("readResponseBody");
+  }
 
   return `import http, { type Response } from "k6/http";
-import { ${runtimeImports} } from "../_runtime.js";
+import { ${Array.from(runtimeImportNames).join(", ")} } from "../_runtime.js";
 
 ${requestInterface}
 
-export function ${operationId}(request: ${requestShape.interfaceName}, flow: string): Response {
+${responseInterface}
+
+export function ${operationId}(request: ${requestShape.interfaceName}, flow: string): ${responseShape.interfaceName} {
   const url = buildUrl(request.baseUrl, ${JSON.stringify(openApiPath)}, ${pathArg}, ${queryArg});
 ${bodyInitializer}  const params = {
 ${headerInitializer}
@@ -231,7 +254,11 @@ ${headerInitializer}
     }
   };
 
-  return http.request(${JSON.stringify(method.toUpperCase())}, url, body, params);
+  const response = http.request(${JSON.stringify(method.toUpperCase())}, url, body, params);
+  return {
+    response,
+    body: ${renderResponseBodyExpression(responseShape)}
+  };
 }
 `;
 }
@@ -300,6 +327,64 @@ function renderRequestInterface(shape: RequestShape): string {
   return lines.join("\n");
 }
 
+function createResponseShape(args: {
+  operationId: string;
+  operation: OperationObject;
+  document: OpenApiDocument;
+  schemaNames: Map<string, string>;
+}): ResponseShape {
+  const { operationId, operation, document, schemaNames } = args;
+  const responseSchemas = collectResponseSchemas(operation, document);
+
+  if (responseSchemas.length === 0) {
+    return {
+      interfaceName: `${toTypeName(operationId)}Result`,
+      bodyType: "undefined",
+      parser: "undefined"
+    };
+  }
+
+  const bodyTypes = responseSchemas.map((responseSchema) =>
+    renderType(responseSchema.schema, {
+      schemaNames,
+      refPrefix: "./schemas"
+    })
+  );
+
+  const hasJson = responseSchemas.some((responseSchema) =>
+    isJsonContentType(responseSchema.contentType)
+  );
+  const hasRaw = responseSchemas.some(
+    (responseSchema) => !isJsonContentType(responseSchema.contentType)
+  );
+
+  return {
+    interfaceName: `${toTypeName(operationId)}Result`,
+    bodyType: Array.from(new Set(bodyTypes)).join(" | "),
+    parser: hasJson && hasRaw ? "auto" : hasJson ? "json" : "raw"
+  };
+}
+
+function renderResponseInterface(shape: ResponseShape): string {
+  return `export interface ${shape.interfaceName} {
+  response: Response;
+  body: ${shape.bodyType};
+}`;
+}
+
+function renderResponseBodyExpression(shape: ResponseShape): string {
+  switch (shape.parser) {
+    case "json":
+      return `response.json() as ${shape.bodyType}`;
+    case "raw":
+      return `response.body as ${shape.bodyType}`;
+    case "auto":
+      return `readResponseBody(response) as ${shape.bodyType}`;
+    case "undefined":
+      return "undefined";
+  }
+}
+
 function renderParameterType(parameter: ParameterObject): string {
   if (parameter.schema) {
     return renderType(parameter.schema, {
@@ -358,6 +443,44 @@ function resolveRequestBody(
   return resolved;
 }
 
+function resolveResponse(
+  response: ResponseObject | ReferenceObject,
+  document: OpenApiDocument
+): ResponseObject {
+  if (!isReference(response)) {
+    return response;
+  }
+
+  const responseName = response.$ref.match(/^#\/components\/responses\/(.+)$/)?.[1];
+  const resolved = responseName ? document.components?.responses?.[responseName] : undefined;
+  if (!resolved || isReference(resolved)) {
+    throw new Error(`Could not resolve response reference ${response.$ref}.`);
+  }
+
+  return resolved;
+}
+
+function collectResponseSchemas(
+  operation: OperationObject,
+  document: OpenApiDocument
+): Array<{ contentType: string; schema: SchemaObject | ReferenceObject }> {
+  const schemas: Array<{ contentType: string; schema: SchemaObject | ReferenceObject }> = [];
+
+  for (const response of Object.values(operation.responses ?? {})) {
+    const resolved = resolveResponse(response, document);
+    for (const [contentType, mediaType] of Object.entries(resolved.content ?? {})) {
+      if (mediaType.schema) {
+        schemas.push({
+          contentType,
+          schema: mediaType.schema
+        });
+      }
+    }
+  }
+
+  return schemas;
+}
+
 function selectJsonSchema(
   requestBody: Pick<RequestBodyObject, "content"> | undefined
 ): SchemaObject | ReferenceObject | undefined {
@@ -371,6 +494,11 @@ function selectJsonSchema(
     Object.entries(content).find(([contentType]) => contentType.endsWith("+json"))?.[1].schema ??
     undefined
   );
+}
+
+function isJsonContentType(contentType: string): boolean {
+  const normalized = contentType.toLowerCase().split(";")[0]?.trim() ?? contentType;
+  return normalized === "application/json" || normalized.endsWith("+json");
 }
 
 async function fetchOpenApiJson(
@@ -535,6 +663,17 @@ export function withJsonHeaders(
   };
 }
 
+export function readResponseBody(response: {
+  headers: Record<string, string>;
+  body: unknown;
+  json(): unknown;
+}): unknown {
+  const contentType = findHeader(response.headers, "content-type");
+  return contentType && isJsonContentType(contentType)
+    ? response.json()
+    : response.body;
+}
+
 function buildQuery(queryValues?: QueryValues): string {
   if (!queryValues) {
     return "";
@@ -562,6 +701,22 @@ function appendQuery(params: URLSearchParams, key: string, value: QueryValue): v
   }
 
   params.append(key, String(value));
+}
+
+function findHeader(headers: Record<string, string>, name: string): string | undefined {
+  const normalizedName = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === normalizedName) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function isJsonContentType(contentType: string): boolean {
+  const normalized = contentType.toLowerCase().split(";")[0]?.trim() ?? contentType;
+  return normalized === "application/json" || normalized.endsWith("+json");
 }
 `;
 }

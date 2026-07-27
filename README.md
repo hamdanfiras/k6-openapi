@@ -61,17 +61,27 @@ generated/
 
 Each operation file is named from its relative OpenAPI path with slashes replaced by hyphens, followed by the `operationId`.
 
-Generated functions return the k6 `Response` directly. They do not perform checks.
+Generated functions return the raw k6 `Response` together with a typed `body`.
+They do not perform checks.
 
 ```ts
-const response = listUsers(
+const result = listUsers(
   {
     baseUrl: "https://accounts.example.com",
     query: { page: 1 }
   },
   "login-flow"
 );
+
+console.log(result.response.status);
+console.log(result.body);
 ```
+
+When an operation has a JSON response schema, `body` is parsed with
+`response.json()` and cast to the generated schema type. When an operation has
+only a non-JSON response schema, such as `text/html` or `image/png`, `body` is
+the raw `response.body` cast to the generated schema type. Operations without a
+response schema return `body: undefined`.
 
 Each request is tagged with:
 
