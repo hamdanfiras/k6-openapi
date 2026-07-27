@@ -52,7 +52,7 @@ interface RequestShape {
 interface ResponseShape {
   interfaceName: string;
   bodyType: string;
-  parser: "json" | "raw" | "auto" | "undefined";
+  parser: "json" | "raw" | "undefined";
 }
 
 export async function readServicesConfig(fileName: string): Promise<ServiceConfig[]> {
@@ -231,8 +231,8 @@ function renderOperationFile(args: {
     ? "buildUrl, withJsonHeaders"
     : "buildUrl";
   const runtimeImportNames = new Set(runtimeImports.split(", "));
-  if (responseShape.parser === "auto") {
-    runtimeImportNames.add("readResponseBody");
+  if (responseShape.parser === "json") {
+    runtimeImportNames.add("readJsonResponseBody");
   }
 
   return `import http, { type Response } from "k6/http";
@@ -351,17 +351,14 @@ function createResponseShape(args: {
     })
   );
 
-  const hasJson = responseSchemas.some((responseSchema) =>
-    isJsonContentType(responseSchema.contentType)
-  );
-  const hasRaw = responseSchemas.some(
-    (responseSchema) => !isJsonContentType(responseSchema.contentType)
+  const hasJsonBody = responseSchemas.some((responseSchema) =>
+    shouldParseResponseAsJson(responseSchema)
   );
 
   return {
     interfaceName: `${toTypeName(operationId)}Result`,
     bodyType: Array.from(new Set(bodyTypes)).join(" | "),
-    parser: hasJson && hasRaw ? "auto" : hasJson ? "json" : "raw"
+    parser: hasJsonBody ? "json" : "raw"
   };
 }
 
@@ -375,11 +372,9 @@ function renderResponseInterface(shape: ResponseShape): string {
 function renderResponseBodyExpression(shape: ResponseShape): string {
   switch (shape.parser) {
     case "json":
-      return `response.json() as ${shape.bodyType}`;
+      return `readJsonResponseBody(response) as ${shape.bodyType}`;
     case "raw":
       return `response.body as ${shape.bodyType}`;
-    case "auto":
-      return `readResponseBody(response) as ${shape.bodyType}`;
     case "undefined":
       return "undefined";
   }
@@ -499,6 +494,38 @@ function selectJsonSchema(
 function isJsonContentType(contentType: string): boolean {
   const normalized = contentType.toLowerCase().split(";")[0]?.trim() ?? contentType;
   return normalized === "application/json" || normalized.endsWith("+json");
+}
+
+function shouldParseResponseAsJson(responseSchema: {
+  contentType: string;
+  schema: SchemaObject | ReferenceObject;
+}): boolean {
+  return (
+    isJsonContentType(responseSchema.contentType) ||
+    isJsonLikeSchema(responseSchema.schema)
+  );
+}
+
+function isJsonLikeSchema(schema: SchemaObject | ReferenceObject): boolean {
+  if (isReference(schema)) {
+    return true;
+  }
+
+  if (schema.format === "binary") {
+    return false;
+  }
+
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  return Boolean(
+    types.includes("object") ||
+      types.includes("array") ||
+      schema.properties ||
+      schema.additionalProperties ||
+      schema.items ||
+      schema.allOf?.length ||
+      schema.oneOf?.length ||
+      schema.anyOf?.length
+  );
 }
 
 async function fetchOpenApiJson(
@@ -663,15 +690,21 @@ export function withJsonHeaders(
   };
 }
 
-export function readResponseBody(response: {
+export function readJsonResponseBody(response: {
   headers: Record<string, string>;
   body: unknown;
   json(): unknown;
 }): unknown {
   const contentType = findHeader(response.headers, "content-type");
-  return contentType && isJsonContentType(contentType)
-    ? response.json()
-    : response.body;
+  if (contentType && isJsonContentType(contentType)) {
+    return parsePossiblyNestedJson(response.json());
+  }
+
+  if (typeof response.body === "string") {
+    return parseJsonString(response.body);
+  }
+
+  return response.json();
 }
 
 function buildQuery(queryValues?: QueryValues): string {
@@ -717,6 +750,25 @@ function findHeader(headers: Record<string, string>, name: string): string | und
 function isJsonContentType(contentType: string): boolean {
   const normalized = contentType.toLowerCase().split(";")[0]?.trim() ?? contentType;
   return normalized === "application/json" || normalized.endsWith("+json");
+}
+
+function parsePossiblyNestedJson(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      return parseJsonString(trimmed);
+    }
+  }
+
+  return value;
+}
+
+function parseJsonString(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 `;
 }
