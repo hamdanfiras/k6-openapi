@@ -225,11 +225,11 @@ function renderOperationFile(args: {
     ? "  const body = request.body === undefined ? undefined : JSON.stringify(request.body);\n"
     : "  const body = undefined;\n";
   const headerInitializer = requestShape.body
-    ? "    headers: withJsonHeaders(request.headers, body !== undefined),"
-    : "    headers: request.headers,";
+    ? "    headers: withBearerToken(withJsonHeaders(request.headers, body !== undefined), bearerToken),"
+    : "    headers: withBearerToken(request.headers, bearerToken),";
   const runtimeImports = requestShape.body
-    ? "buildUrl, withJsonHeaders"
-    : "buildUrl";
+    ? "buildUrl, withBearerToken, withJsonHeaders"
+    : "buildUrl, withBearerToken";
   const runtimeImportNames = new Set(runtimeImports.split(", "));
   if (responseShape.parser === "json") {
     runtimeImportNames.add("readJsonResponseBody");
@@ -242,7 +242,11 @@ ${requestInterface}
 
 ${responseInterface}
 
-export function ${operationId}(request: ${requestShape.interfaceName}, flow: string): ${responseShape.interfaceName} {
+export function ${operationId}(
+  request: ${requestShape.interfaceName},
+  flow: string,
+  bearerToken?: string
+): ${responseShape.interfaceName} {
   const url = buildUrl(request.baseUrl, ${JSON.stringify(openApiPath)}, ${pathArg}, ${queryArg});
 ${bodyInitializer}  const params = {
 ${headerInitializer}
@@ -687,6 +691,20 @@ export function withJsonHeaders(
   return {
     "Content-Type": "application/json",
     ...(headers ?? {})
+  };
+}
+
+export function withBearerToken(
+  headers: Record<string, string> | undefined,
+  bearerToken: string | undefined
+): Record<string, string> | undefined {
+  if (!bearerToken) {
+    return headers;
+  }
+
+  return {
+    ...(headers ?? {}),
+    Authorization: \`Bearer \${bearerToken}\`
   };
 }
 

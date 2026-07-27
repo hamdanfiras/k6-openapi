@@ -70,7 +70,8 @@ const result = listUsers(
     baseUrl: "https://accounts.example.com",
     query: { page: 1 }
   },
-  "login-flow"
+  "login-flow",
+  "jwt-token"
 );
 
 console.log(result.response.status);
@@ -82,6 +83,10 @@ When an operation has a JSON response schema, `body` is parsed with
 only a non-JSON response schema, such as `text/html` or `image/png`, `body` is
 the raw `response.body` cast to the generated schema type. Operations without a
 response schema return `body: undefined`.
+
+Generated functions also accept an optional bearer token as the third argument.
+When passed, it is sent as `Authorization: Bearer <token>` and merged with any
+headers on the request.
 
 Each request is tagged with:
 
