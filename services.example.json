@@ -1,10 +1,6 @@
 [
   {
-    "serviceName": "accounts",
-    "url": "https://accounts.example.com/v3/api-docs"
-  },
-  {
-    "serviceName": "cards",
-    "url": "https://cards.example.com/v3/api-docs"
+    "serviceName": "pets",
+    "url": "https://petstore3.swagger.io/api/v3/openapi.json"
   }
 ]
