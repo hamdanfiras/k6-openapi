@@ -86,29 +86,28 @@ export async function readServicesConfig(fileName: string): Promise<ServiceConfi
 export async function generate(options: GenerateOptions): Promise<void> {
   assertUniqueServiceNames(options.services);
 
-  const servicesDir = path.join(options.outDir, "services");
-  await mkdir(servicesDir, { recursive: true });
-  await writeFile(path.join(servicesDir, "_runtime.ts"), renderRuntime(), "utf8");
+  await mkdir(options.outDir, { recursive: true });
+  await writeFile(path.join(options.outDir, "_runtime.ts"), renderRuntime(), "utf8");
 
   for (const service of options.services) {
-    await generateService(service, servicesDir, {
+    await generateService(service, options.outDir, {
       insecure: Boolean(options.insecure)
     });
   }
 
-  await writeServicesIndex(servicesDir);
+  await writeServicesIndex(options.outDir);
 }
 
 async function generateService(
   service: ServiceConfig,
-  servicesDir: string,
+  outputDir: string,
   options: Pick<GenerateOptions, "insecure">
 ): Promise<void> {
   const serviceName = sanitizeServiceName(service.serviceName);
   const document = await fetchOpenApiJson(service.url, {
     insecure: Boolean(options.insecure)
   });
-  const serviceDir = path.join(servicesDir, serviceName);
+  const serviceDir = path.join(outputDir, serviceName);
   const schemasDir = path.join(serviceDir, "schemas");
   const schemas = document.components?.schemas ?? {};
   const schemaNames = createSchemaNameMap(schemas);

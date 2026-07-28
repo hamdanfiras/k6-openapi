@@ -43,20 +43,20 @@ The input file is an array of unique service names and OpenAPI JSON URLs:
 
 ```text
 generated/
-  services/
-    _runtime.ts
-    accounts/
+  _runtime.ts
+  index.ts
+  accounts/
+    index.ts
+    get-users-listUsers.ts
+    schemas/
+      Account.ts
       index.ts
-      get-users-listUsers.ts
-      schemas/
-        Account.ts
-        index.ts
-    cards/
+  cards/
+    index.ts
+    post-cards-createCard.ts
+    schemas/
+      Card.ts
       index.ts
-      post-cards-createCard.ts
-      schemas/
-        Card.ts
-        index.ts
 ```
 
 Each operation file is named from its relative OpenAPI path with slashes replaced by hyphens, followed by the `operationId`.
